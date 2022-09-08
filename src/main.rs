@@ -1,4 +1,3 @@
-use core::num::dec2flt::number::Number;
 use std::fmt::format;
 use std::{collections::HashMap, sync::Arc};
 use std::fs::File;
@@ -7,8 +6,9 @@ use reqwest::{cookie::Jar, Url, ClientBuilder};
 use serde::{Deserialize};
 use rand::{Rng, thread_rng};
 use rand::distributions::Alphanumeric;
-use serde_json::{Result, Value};
+use serde_json::{ Value};
 use std::{thread, time};
+use async_recursion::async_recursion;
 
 
 #[derive(Deserialize)]
@@ -21,8 +21,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     //从文件写入 Cookie
     let mut cookie = File::open("cookies.txt")?;
     let mut cookie_contents = String::new();
+    let user_agent = "Mozilla/5.0 (X11; CrOS x86_64 14989.58.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/105.0.0.0 Safari/537.36".to_string();
     cookie.read_to_string(&mut cookie_contents)?;
-    let baha = BahaRequest::new(cookie_contents)?;
+    let baha = BahaRequest::new(cookie_contents,user_agent)?;
     let resp = baha.request("https://ani.gamer.com.tw/ajax/getdeviceid.php".to_string()).await?;
     baha.get_deviceid().await?;
     println!("{}", resp);
@@ -46,18 +47,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 struct BahaRequest {
     cookie : Arc<Jar>,
-    deviceid : String
+    deviceid : String,
+    user_agent : String
 }
 //TODO 1. 可修改代理
 //TODO 2. 热更新 Cookies
 
 impl BahaRequest {
-    fn new(cookie: String) -> Result<BahaRequest,Box<dyn std::error::Error>> {
+    fn new(cookie: String, user_agent: String) -> Result<BahaRequest,Box<dyn std::error::Error>> {
         let url = "https://ani.gamer.com.tw".parse::<Url>()?;
         let jar = Jar::default();
         jar.add_cookie_str(cookie.as_str(), &url);
         let jar = Arc::new(jar);
-        Ok(BahaRequest { cookie: jar,deviceid: "".to_string()  })
+        Ok(BahaRequest { cookie: jar,deviceid: "".to_string(),user_agent: user_agent })
     }
 
     async fn request(&self, url : String) -> Result<String,Box<dyn std::error::Error>> {
@@ -117,6 +119,7 @@ impl BahaRequest {
         Ok(resp)
     }
 
+    #[async_recursion]
     async fn check_no_ad(&self, sn : &str) -> Result<String,Box<dyn std::error::Error>> {
         let url = format!("https://ani.gamer.com.tw/ajax/token.php?adID=0&sn={}&device={}&hash={}",sn, self.deviceid, Self::rand_str());
         let resp = self.request(url).await?;
@@ -124,18 +127,24 @@ impl BahaRequest {
         match resp_json.get("time") {
             Some(t) => {
                 //if(t )
-                t = t.as_i64();
+                let t = t.as_i64().unwrap();
                 if t != 1 { //广告还没去除
                     thread::sleep(time::Duration::from_secs(2));
-                    self.skip_ad(sn);
-                    self.video_start(sn);
-                    self.check_no_ad(sn);
+                    self.skip_ad(sn).await?;
+                    self.video_start(sn).await?;
+                    self.check_no_ad(sn).await?;
                 } else {
                     //通过广告检查
                 }
             },
-            None => Err("动画疯 IP 限制")
+            _ => ()
         }
+        Ok(resp)
+    }
+
+    async fn parse_playlist(&self, sn : &str) -> Result<String,Box<dyn std::error::Error>> {
+        let url = format!("https://ani.gamer.com.tw/ajax/videoStart.php?sn={}",sn);
+        let resp = self.request(url).await?;
         Ok(resp)
     }
 
