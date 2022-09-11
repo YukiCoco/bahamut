@@ -51,8 +51,33 @@ async fn ready() {
     //从文件写入 Cookie
     let mut cookie = File::open("cookie.txt").unwrap();
     let mut cookie_contents = String::new();
-    let user_agent = "Mozilla/5.0 (X11; CrOS x86_64 14989.58.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/105.0.0.0 Safari/537.36".to_string();
+    let user_agent = "Mozilla/5.0 (X11; Linux x86_64; rv:103.0) Gecko/20100101 Firefox/103.0".to_string();
     cookie.read_to_string(&mut cookie_contents).unwrap();
-    let baha = baha::BahaRequest::new(cookie_contents, user_agent).unwrap();
-    baha.get_playlist("31142").await.unwrap();
+    let mut anime = baha::BahaRequest::new(cookie_contents, user_agent).unwrap();
+    let sn = "26178";
+    let id = anime.get_deviceid().await.unwrap();
+    println!("{}", id);
+    let access = anime.gain_access(sn).await.unwrap();
+    println!("{}", access);
+    anime.unlock(sn).await.unwrap();
+    anime.check_lock(sn).await.unwrap();
+    let playlist = anime.get_playlist(sn).await.unwrap();
+    let source = anime.parse_playlist(playlist).await.unwrap();
+    for i in source.iter() {
+        let (key,value) = i;
+        println!("{},{}",key,value);
+    }
+    println!("");
+}
+
+#[test]
+fn check_json() {
+    let playlist = r#"
+    {"src":"","animeSn":112896,"r18":3,"vip":false,"time":0,"login":0,"promote":[]}
+    "#;
+    let playlist: Value = serde_json::from_str(playlist).unwrap();
+    let src = match playlist.get("src") {
+        Some(src) => println!("{}", src),
+        None => panic!("error")
+    };
 }

@@ -2,41 +2,63 @@ pub mod baha {
     use async_recursion::async_recursion;
     use rand::distributions::Alphanumeric;
     use rand::{thread_rng, Rng};
+    use reqwest::header::HeaderMap;
     use reqwest::{cookie::Jar, ClientBuilder, Url};
     use serde_json::Value;
     use std::{collections::HashMap, sync::Arc};
     use std::{thread, time};
 
     pub struct BahaRequest {
-        cookie: Arc<Jar>,
+        cookie: String,
         deviceid: String,
         user_agent: String,
+        headers: HeaderMap,
     }
     //TODO 1. 可修改代理
     //TODO 2. 热更新 Cookies
 
     impl BahaRequest {
+        fn gen_header() -> HeaderMap {
+            let mut headers = HeaderMap::new();
+            headers.append("origin", "https://ani.gamer.com.tw".parse().unwrap());
+            headers.append(
+                "accept-language",
+                "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.6".parse().unwrap(),
+            );
+            headers.append("accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8".parse().unwrap());
+            //headers.append("accept-encoding", "gzip, deflate".parse().unwrap());
+            headers.append("cache-control", "max-age=0".parse().unwrap());
+            headers
+        }
+
         pub fn new(
             cookie: String,
             user_agent: String,
         ) -> Result<BahaRequest, Box<dyn std::error::Error>> {
-            let url = "https://ani.gamer.com.tw".parse::<Url>()?;
-            let jar = Jar::default();
-            jar.add_cookie_str(cookie.as_str(), &url);
-            let jar = Arc::new(jar);
+            // let url = "https://ani.gamer.com.tw".parse::<Url>()?;
+            // let jar = Jar::default();
+            // for i in cookie.split(';').into_iter() {
+            //     let i = i.trim();
+            //     let (key, value) = i.split_once('=').unwrap();
+            // }
+            // jar.add_cookie_str(cookie.as_str(), &url);
+            // let jar = Arc::new(jar);
             Ok(BahaRequest {
-                cookie: jar,
+                cookie: cookie,
                 deviceid: "".to_string(),
                 user_agent: user_agent,
+                headers: BahaRequest::gen_header(),
             })
         }
 
         async fn request(&self, url: String) -> Result<String, Box<dyn std::error::Error>> {
             let resp = ClientBuilder::new();
             let resp = resp
-                .cookie_provider(self.cookie.clone())
+                .default_headers(self.headers.clone())
+                //.cookie_provider(self.cookie.clone())
                 .build()?
                 .get(url)
+                .header("Cookie", self.cookie.clone())
                 .send()
                 .await?
                 .text()
@@ -60,11 +82,14 @@ pub mod baha {
             Ok(resp)
         }
 
-        pub async fn get_deviceid(&self) -> Result<String, Box<dyn std::error::Error>> {
+        pub async fn get_deviceid(&mut self) -> Result<String, Box<dyn std::error::Error>> {
             let resp = self
                 .request("https://ani.gamer.com.tw/ajax/getdeviceid.php".to_string())
                 .await?;
-            Ok(resp)
+            let resp : Value = serde_json::from_str(resp.as_str()).unwrap();
+            let deviceid = resp.get("deviceid").unwrap().as_str().unwrap().to_string();
+            self.deviceid = deviceid.clone(); //TODO: 写完优化
+            Ok(deviceid)
         }
 
         fn rand_str() -> String {
@@ -161,7 +186,10 @@ pub mod baha {
             Ok(resp)
         }
 
-        pub async fn parse_playlist(&self, playlist: String) -> Result<(), Box<dyn std::error::Error>> {
+        pub async fn parse_playlist(
+            &self,
+            playlist: String,
+        ) -> Result<HashMap<String, String>, Box<dyn std::error::Error>> {
             let playlist: Value = serde_json::from_str(playlist.as_str()).unwrap();
             let src = match playlist.get("src") {
                 Some(src) => src.as_str(),
@@ -169,6 +197,7 @@ pub mod baha {
                     return Err(GenError::from(BahaError {
                         message: "从 playlist 中找不到 src".to_string(),
                         error_kind: BahaErrorKind::parse_playlist,
+                        detail: playlist.to_string(),
                     }));
                 }
             };
@@ -192,7 +221,7 @@ pub mod baha {
                     create_url(&url_prefix, &i["m3u8"]),
                 );
             }
-            Ok(())
+            Ok(source)
         }
     }
 
@@ -207,6 +236,7 @@ pub mod baha {
     pub struct BahaError {
         pub message: String,
         pub error_kind: BahaErrorKind,
+        pub detail: String,
     }
 
     impl std::fmt::Display for BahaErrorKind {
@@ -217,7 +247,7 @@ pub mod baha {
 
     impl std::fmt::Display for BahaError {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(f, "发生错误：{}，在{}", self.message, self.error_kind)
+            write!(f, "发生错误：{}，在{}", self.message, self.detail)
         }
     }
 
